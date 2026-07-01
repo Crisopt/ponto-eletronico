@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Ponto Fácil — Reconhecimento Facial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0F1A17;
+    --panel: #16241F;
+    --cream: #F5F1E8;
+    --cream-dim: #A9B5AE;
+    --mint: #3ECF8E;
+    --amber: #F2A65A;
+    --coral: #F2545B;
+    --line: #24352E;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100%;
+    background: var(--bg); color: var(--cream);
+    font-family: 'Manrope', sans-serif;
+  }
+  #app { min-height: 100vh; display: flex; flex-direction: column; }
+
+  header { text-align: center; padding: 22px 20px 10px; }
+  header .marca { font-weight: 800; font-size: 20px; }
+  header .marca span { color: var(--mint); }
+  header .relogio { color: var(--cream-dim); font-size: 14px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+  main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; }
+
+  #tela-scan { text-align: center; width: 100%; max-width: 380px; }
+  #tela-scan h1 { font-size: 22px; font-weight: 800; margin: 0 0 4px; }
+  #tela-scan p.sub { color: var(--cream-dim); margin: 0 0 20px; font-size: 14px; }
+
+  #video-wrap {
+    position: relative; width: 280px; height: 280px; margin: 0 auto;
+    border-radius: 50%; overflow: hidden; background: #000;
+    border: 4px solid var(--line);
+  }
+  #video-wrap.reconhecendo { border-color: var(--mint); }
+  #video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+
+  #status-texto { margin-top: 18px; color: var(--cream-dim); font-size: 14px; min-height: 20px; }
+
+  /* CONFIRMAÇÃO */
+  #tela-ok { text-align: center; display: none; }
+  .ring {
+    width: 170px; height: 170px; border-radius: 50%; margin: 0 auto 24px;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(circle, rgba(62,207,142,0.15), transparent 70%);
+    border: 4px solid var(--mint);
+    animation: pop 0.4s cubic-bezier(.34,1.56,.64,1);
+  }
+  .ring svg { width: 78px; height: 78px; }
+  @keyframes pop { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  #tela-ok h1 { font-size: 26px; font-weight: 800; margin: 0 0 6px; }
+  #tela-ok .tipo { font-size: 16px; font-weight: 700; color: var(--mint); margin-bottom: 4px; }
+  #tela-ok .loja { color: var(--cream-dim); font-size: 14px; margin-bottom: 2px; }
+  #tela-ok .hora { color: var(--cream-dim); font-size: 14px; }
+
+  /* ERRO */
+  #tela-erro { text-align: center; display: none; }
+  #tela-erro .ring { border-color: var(--coral); background: radial-gradient(circle, rgba(242,84,91,0.15), transparent 70%); }
+  #tela-erro h1 { font-size: 20px; font-weight: 800; margin: 0 0 8px; }
+  #tela-erro p { color: var(--cream-dim); font-size: 14px; }
+
+  footer { text-align: center; padding: 14px; color: var(--cream-dim); font-size: 11.5px; opacity: 0.6; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="marca">Ponto <span>Fácil</span></div>
+    <div class="relogio" id="relogio">--:--:--</div>
+  </header>
+
+  <main>
+    <div id="tela-scan">
+      <h1>Reconhecimento facial</h1>
+      <p class="sub">Posicione seu rosto dentro do círculo</p>
+      <div id="video-wrap">
+        <video id="video" autoplay muted playsinline></video>
+      </div>
+      <div id="status-texto">Carregando modelo de reconhecimento...</div>
+    </div>
+
+    <div id="tela-ok">
+      <div class="ring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#3ECF8E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </div>
+      <div class="tipo" id="ok-tipo">Entrada registrada</div>
+      <h1 id="ok-nome">Nome do funcionário</h1>
+      <div class="loja" id="ok-loja">Loja</div>
+      <div class="hora" id="ok-hora">--:--</div>
+    </div>
+
+    <div id="tela-erro">
+      <div class="ring">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#F2545B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </div>
+      <h1 id="erro-titulo">Rosto não reconhecido</h1>
+      <p id="erro-msg">Tente novamente com boa iluminação.</p>
+    </div>
+  </main>
+
+  <footer>Dispositivo: <span id="device-id-footer"></span></footer>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="ponto-logic.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+<script>
+  const MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/";
+  const LIMITE_DISTANCIA = 0.5; // quanto menor, mais rígido o reconhecimento (0.4 a 0.55 é razoável)
+
+  function tickRelogio() {
+    document.getElementById("relogio").textContent = new Date().toLocaleTimeString("pt-BR");
+  }
+  setInterval(tickRelogio, 1000);
+  tickRelogio();
+
+  function getDeviceId() {
+    let id = localStorage.getItem("pontoFacil_deviceId");
+    if (!id) { id = "dev_" + crypto.randomUUID(); localStorage.setItem("pontoFacil_deviceId", id); }
+    return id;
+  }
+  const deviceId = getDeviceId();
+  document.getElementById("device-id-footer").textContent = deviceId;
+
+  const telaScan = document.getElementById("tela-scan");
+  const telaOk = document.getElementById("tela-ok");
+  const telaErro = document.getElementById("tela-erro");
+  const statusTexto = document.getElementById("status-texto");
+  const videoWrap = document.getElementById("video-wrap");
+
+  function mostrarSomente(el) {
+    [telaScan, telaOk, telaErro].forEach(e => e.style.display = "none");
+    el.style.display = "block";
+  }
+
+  let funcionariosCadastrados = []; // [{id, nome, lojaId, descritor: Float32Array}]
+  let pausado = false;
+  let intervaloReconhecimento = null;
+
+  async function carregarFuncionariosComRosto() {
+    const snap = await db.collection("funcionarios").where("ativo", "==", true).get();
+    funcionariosCadastrados = [];
+    snap.forEach(doc => {
+      const f = doc.data();
+      if (Array.isArray(f.descritorFacial) && f.descritorFacial.length > 0) {
+        funcionariosCadastrados.push({
+          id: doc.id,
+          nome: f.nome,
+          lojaId: f.lojaId,
+          descritor: new Float32Array(f.descritorFacial)
+        });
+      }
+    });
+  }
+
+  async function carregarNomeLoja(lojaId) {
+    try {
+      const doc = await db.collection("lojas").doc(lojaId).get();
+      return doc.exists ? doc.data().nome : "—";
+    } catch (e) { return "—"; }
+  }
+
+  async function iniciarCamera() {
+    const video = document.getElementById("video");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+    video.srcObject = stream;
+    return new Promise(resolve => { video.onloadedmetadata = () => resolve(video); });
+  }
+
+  async function loopReconhecimento() {
+    const video = document.getElementById("video");
+    intervaloReconhecimento = setInterval(async () => {
+      if (pausado || funcionariosCadastrados.length === 0) return;
+
+      const deteccao = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks().withFaceDescriptor();
+
+      if (!deteccao) return; // nenhum rosto no quadro, continua tentando
+
+      let melhor = null;
+      let melhorDist = Infinity;
+      for (const f of funcionariosCadastrados) {
+        const dist = faceapi.euclideanDistance(deteccao.descriptor, f.descritor);
+        if (dist < melhorDist) { melhorDist = dist; melhor = f; }
+      }
+
+      if (melhor && melhorDist < LIMITE_DISTANCIA) {
+        pausado = true;
+        videoWrap.classList.add("reconhecendo");
+        await processarBatida(melhor);
+      }
+    }, 900);
+  }
+
+  async function processarBatida(funcionario) {
+    try {
+      const resultado = await registrarPonto(funcionario, deviceId, funcionario.lojaId);
+
+      if (!resultado.ok) {
+        mostrarErro("Jornada já concluída", `${funcionario.nome} já registrou os 4 pontos de hoje.`);
+        return;
+      }
+
+      const lojaNome = await carregarNomeLoja(funcionario.lojaId);
+      document.getElementById("ok-tipo").textContent = resultado.label + " registrada";
+      document.getElementById("ok-nome").textContent = funcionario.nome;
+      document.getElementById("ok-loja").textContent = lojaNome;
+      document.getElementById("ok-hora").textContent = new Date().toLocaleTimeString("pt-BR");
+      mostrarSomente(telaOk);
+      voltarParaScanApos(3200);
+    } catch (e) {
+      console.error(e);
+      mostrarErro("Erro ao registrar", "Verifique a conexão com a internet e tente novamente.");
+    }
+  }
+
+  function mostrarErro(titulo, msg) {
+    document.getElementById("erro-titulo").textContent = titulo;
+    document.getElementById("erro-msg").textContent = msg;
+    mostrarSomente(telaErro);
+    voltarParaScanApos(2800);
+  }
+
+  function voltarParaScanApos(ms) {
+    setTimeout(() => {
+      mostrarSomente(telaScan);
+      videoWrap.classList.remove("reconhecendo");
+      pausado = false;
+    }, ms);
+  }
+
+  async function iniciar() {
+    try {
+      statusTexto.textContent = "Carregando modelo de reconhecimento...";
+      await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+      await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+      statusTexto.textContent = "Carregando funcionários cadastrados...";
+      await carregarFuncionariosComRosto();
+
+      statusTexto.textContent = "Ligando câmera...";
+      await iniciarCamera();
+
+      statusTexto.textContent = "Aponte para o seu rosto";
+      loopReconhecimento();
+    } catch (e) {
+      console.error(e);
+      statusTexto.textContent = "Erro: " + e.message;
+    }
+  }
+
+  iniciar();
+</script>
+</body>
+</html>
