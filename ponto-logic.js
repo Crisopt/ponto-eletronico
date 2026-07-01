@@ -22,14 +22,18 @@ function inicioDoDia() {
 
 async function proximoTipoDeRegistro(funcionarioId) {
   const inicio = inicioDoDia();
+
+  // Consulta só com IGUALDADE (funcionarioId) — não precisa de índice composto.
+  // O filtro por data e a ordenação são feitos aqui no JavaScript.
   const snap = await db
     .collection("registros")
     .where("funcionarioId", "==", funcionarioId)
-    .where("timestamp", ">=", inicio)
-    .orderBy("timestamp", "asc")
     .get();
 
-  const registrosHoje = snap.docs.map((d) => d.data());
+  const registrosHoje = snap.docs
+    .map((d) => d.data())
+    .filter((r) => r.timestamp && r.timestamp.toDate() >= inicio)
+    .sort((a, b) => a.timestamp.toDate() - b.timestamp.toDate());
 
   if (registrosHoje.length >= SEQUENCIA.length) {
     return null; // já completou os 4 pontos do dia
