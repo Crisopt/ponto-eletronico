@@ -85,6 +85,26 @@
   #qr-modal canvas { margin: 12px auto; }
   #qr-modal h3 { margin: 0 0 4px; font-size: 16px; }
   #qr-modal p { color: var(--ink-dim); font-size: 13px; margin: 0 0 12px; }
+
+  /* CAPTURA DE ROSTO NO CADASTRO */
+  .face-box {
+    display: flex; gap: 16px; align-items: center; flex-wrap: wrap;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; margin: 4px 0 14px;
+  }
+  .face-box video {
+    width: 160px; height: 120px; object-fit: cover; border-radius: 8px;
+    background: #000; transform: scaleX(-1);
+  }
+  .face-box .face-status { font-size: 13px; color: var(--ink-dim); flex: 1; min-width: 180px; }
+  .face-box .face-status.ok { color: var(--mint); font-weight: 700; }
+
+  /* PAINEL QR DA EMPRESA */
+  #qr-empresa-wrap canvas { margin: 0 auto; }
+  .aviso {
+    background: var(--mint-bg); color: var(--mint); border-radius: 10px;
+    padding: 12px 14px; font-size: 13.5px; font-weight: 600; margin-bottom: 16px;
+  }
 </style>
 </head>
 <body>
@@ -109,6 +129,7 @@
     <button data-painel="painel-funcionarios" class="active">Funcionários</button>
     <button data-painel="painel-lojas">Lojas</button>
     <button data-painel="painel-relatorio">Relatório de ponto</button>
+    <button data-painel="painel-qr">Terminal Facial</button>
   </nav>
 
   <main>
@@ -119,8 +140,20 @@
         <div class="form-row">
           <input id="func-nome" placeholder="Nome completo" />
           <select id="func-loja"></select>
-          <button class="btn" id="btn-add-func">Cadastrar</button>
         </div>
+
+        <div class="face-box">
+          <video id="face-video" autoplay muted playsinline></video>
+          <div>
+            <div class="face-status" id="face-status">Câmera desligada</div>
+            <div class="form-row" style="margin-top:8px">
+              <button class="btn secundario pequeno" id="btn-cam-on">Ligar câmera</button>
+              <button class="btn secundario pequeno" id="btn-capturar-rosto" disabled>Capturar rosto</button>
+            </div>
+          </div>
+        </div>
+
+        <button class="btn" id="btn-add-func">Cadastrar funcionário</button>
       </div>
       <div class="card">
         <h2>Funcionários cadastrados</h2>
@@ -169,6 +202,28 @@
         </table>
       </div>
     </div>
+
+    <!-- QR ÚNICO / TERMINAL FACIAL -->
+    <div class="painel" id="painel-qr">
+      <div class="card">
+        <h2>QR Code único do terminal facial</h2>
+        <div class="aviso">
+          Este é o ÚNICO QR Code da empresa. Imprima e fixe num lugar visível (entrada, recepção
+          etc). Qualquer funcionário escaneia com a câmera do PRÓPRIO celular — o sistema
+          reconhece o rosto automaticamente entre todos os cadastrados, identifica a pessoa e a
+          loja dela, e bate o ponto sozinho.
+        </div>
+        <p style="color:var(--ink-dim);font-size:13.5px;margin-bottom:10px">
+          Cole abaixo a URL pública do arquivo <code>registrar.html</code> depois de publicar no
+          GitHub Pages (ex: <code>https://seuusuario.github.io/ponto-facil/registrar.html</code>).
+        </p>
+        <div class="form-row">
+          <input id="qr-url-base" placeholder="URL do registrar.html publicado" />
+          <button class="btn" id="btn-gerar-qr-empresa">Gerar QR</button>
+        </div>
+        <div id="qr-empresa-wrap" style="text-align:center;margin-top:20px"></div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -188,9 +243,64 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
 <script>
   const LABELS = { entrada: "Entrada", saida_almoco: "Saída almoço", volta_almoco: "Volta almoço", saida: "Saída" };
+
+  // ---------- RECONHECIMENTO FACIAL (cadastro) ----------
+  const MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/";
+  let faceApiPronto = false;
+  let descritorCapturado = null;
+
+  faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
+    .then(() => faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL))
+    .then(() => faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL))
+    .then(() => { faceApiPronto = true; })
+    .catch(e => console.error("Erro ao carregar modelo facial:", e));
+
+  document.getElementById("btn-cam-on").addEventListener("click", async () => {
+    const status = document.getElementById("face-status");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      document.getElementById("face-video").srcObject = stream;
+      status.textContent = "Câmera ligada — posicione o rosto e clique em Capturar";
+      status.className = "face-status";
+      document.getElementById("btn-capturar-rosto").disabled = false;
+    } catch (e) {
+      status.textContent = "Não foi possível acessar a câmera: " + e.message;
+    }
+  });
+
+  document.getElementById("btn-capturar-rosto").addEventListener("click", async () => {
+    const status = document.getElementById("face-status");
+    if (!faceApiPronto) { status.textContent = "Aguarde o modelo carregar e tente de novo."; return; }
+    status.textContent = "Analisando rosto...";
+    status.className = "face-status";
+    const video = document.getElementById("face-video");
+    const deteccao = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+      .withFaceLandmarks().withFaceDescriptor();
+    if (!deteccao) {
+      status.textContent = "Nenhum rosto detectado — melhore a iluminação e tente novamente.";
+      return;
+    }
+    descritorCapturado = Array.from(deteccao.descriptor);
+    status.textContent = "✓ Rosto capturado com sucesso!";
+    status.className = "face-status ok";
+  });
+
+  // ---------- QR ÚNICO DA EMPRESA ----------
+  const urlSalva = localStorage.getItem("pontoFacil_qrUrl");
+  if (urlSalva) document.getElementById("qr-url-base").value = urlSalva;
+
+  document.getElementById("btn-gerar-qr-empresa").addEventListener("click", () => {
+    const url = document.getElementById("qr-url-base").value.trim();
+    if (!url) return alert("Cole a URL pública do registrar.html.");
+    localStorage.setItem("pontoFacil_qrUrl", url);
+    const wrap = document.getElementById("qr-empresa-wrap");
+    wrap.innerHTML = "";
+    new QRCode(wrap, { text: url, width: 240, height: 240 });
+  });
 
   // ---------- LOGIN ----------
   auth.onAuthStateChanged(user => {
@@ -241,13 +351,18 @@
 
   document.getElementById("btn-add-loja").addEventListener("click", async () => {
     const nome = document.getElementById("loja-nome").value.trim();
-    if (!nome) return;
-    await db.collection("lojas").add({
-      nome, endereco: document.getElementById("loja-endereco").value.trim()
-    });
-    document.getElementById("loja-nome").value = "";
-    document.getElementById("loja-endereco").value = "";
-    carregarLojas();
+    if (!nome) return alert("Preencha o nome da loja.");
+    try {
+      await db.collection("lojas").add({
+        nome, endereco: document.getElementById("loja-endereco").value.trim()
+      });
+      document.getElementById("loja-nome").value = "";
+      document.getElementById("loja-endereco").value = "";
+      carregarLojas();
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao cadastrar loja: " + e.message);
+    }
   });
 
   // ---------- FUNCIONÁRIOS ----------
@@ -274,13 +389,27 @@
   document.getElementById("btn-add-func").addEventListener("click", async () => {
     const nome = document.getElementById("func-nome").value.trim();
     const lojaId = document.getElementById("func-loja").value;
-    if (!nome || !lojaId) return alert("Preencha nome e loja.");
-    await db.collection("funcionarios").add({
-      nome, lojaId, ativo: true, qrCodeId: crypto.randomUUID(),
-      criadoEm: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    document.getElementById("func-nome").value = "";
-    carregarFuncionarios();
+    if (!nome) return alert("Preencha o nome.");
+    if (!lojaId) return alert("Cadastre uma loja primeiro (aba 'Lojas') antes de adicionar funcionários.");
+    if (!descritorCapturado) return alert("Capture o rosto do funcionário (ligue a câmera e clique em 'Capturar rosto') antes de cadastrar.");
+
+    try {
+      await db.collection("funcionarios").add({
+        nome, lojaId, ativo: true,
+        qrCodeId: crypto.randomUUID(), // mantido por compatibilidade com o kiosk.html (crachá de backup)
+        descritorFacial: descritorCapturado,
+        criadoEm: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      document.getElementById("func-nome").value = "";
+      descritorCapturado = null;
+      const status = document.getElementById("face-status");
+      status.textContent = "Câmera ligada — posicione o rosto e clique em Capturar";
+      status.className = "face-status";
+      carregarFuncionarios();
+    } catch (e) {
+      console.error(e);
+      alert("Erro ao cadastrar: " + e.message);
+    }
   });
 
   function mostrarQr(id, nome, qrCodeId) {
