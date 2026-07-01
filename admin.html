@@ -171,13 +171,22 @@
         <div class="form-row">
           <input id="loja-nome" placeholder="Nome da loja (ex: Loja Centro)" />
           <input id="loja-endereco" placeholder="Endereço (opcional)" />
-          <button class="btn" id="btn-add-loja">Cadastrar</button>
         </div>
+        <div class="form-row">
+          <input id="loja-lat" placeholder="Latitude" type="number" step="any" />
+          <input id="loja-lng" placeholder="Longitude" type="number" step="any" />
+          <button class="btn secundario" id="btn-usar-localizacao">📍 Usar minha localização</button>
+        </div>
+        <p style="color:var(--ink-dim);font-size:12.5px;margin:-4px 0 12px">
+          Para o reconhecimento facial validar se o funcionário está na loja, cadastre a
+          localização. Se estiver na loja agora, clique em "Usar minha localização".
+        </p>
+        <button class="btn" id="btn-add-loja">Cadastrar</button>
       </div>
       <div class="card">
         <h2>Lojas cadastradas</h2>
         <table>
-          <thead><tr><th>Nome</th><th>Endereço</th></tr></thead>
+          <thead><tr><th>Nome</th><th>Endereço</th><th>Localização</th><th></th></tr></thead>
           <tbody id="tabela-lojas"></tbody>
         </table>
       </div>
@@ -232,7 +241,7 @@
   <div class="box">
     <h3 id="qr-nome">Nome</h3>
     <p>Imprima e entregue este crachá ao funcionário</p>
-    <canvas id="qr-canvas"></canvas>
+    <div id="qr-canvas"></div>
     <button class="btn" onclick="window.print()">Imprimir</button>
     <button class="btn secundario" onclick="document.getElementById('qr-modal').style.display='none'">Fechar</button>
   </div>
@@ -343,21 +352,66 @@
     selRel.innerHTML = '<option value="">Todas as lojas</option>';
     snap.forEach(doc => {
       const l = doc.data();
-      tbody.innerHTML += `<tr><td>${l.nome}</td><td>${l.endereco || "—"}</td></tr>`;
+      const temGeo = l.latitude != null && l.longitude != null;
+      tbody.innerHTML += `<tr>
+        <td>${l.nome}</td>
+        <td>${l.endereco || "—"}</td>
+        <td>${temGeo ? "✅ Configurada" : "⚠️ Não configurada"}</td>
+        <td><button class="btn secundario pequeno" onclick="marcarLocalizacaoLoja('${doc.id}')">📍 Marcar localização atual</button></td>
+      </tr>`;
       selFunc.innerHTML += `<option value="${doc.id}">${l.nome}</option>`;
       selRel.innerHTML += `<option value="${doc.id}">${l.nome}</option>`;
     });
   }
 
+  function marcarLocalizacaoLoja(lojaId) {
+    if (!navigator.geolocation) return alert("Geolocalização não suportada neste navegador.");
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          await db.collection("lojas").doc(lojaId).update({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude
+          });
+          alert("Localização salva! Certifique-se de estar dentro da loja ao usar este botão.");
+          carregarLojas();
+        } catch (e) {
+          alert("Erro ao salvar localização: " + e.message);
+        }
+      },
+      (err) => alert("Não foi possível obter a localização: " + err.message),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  document.getElementById("btn-usar-localizacao").addEventListener("click", () => {
+    if (!navigator.geolocation) return alert("Geolocalização não suportada neste navegador.");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        document.getElementById("loja-lat").value = pos.coords.latitude.toFixed(6);
+        document.getElementById("loja-lng").value = pos.coords.longitude.toFixed(6);
+      },
+      (err) => alert("Não foi possível obter a localização: " + err.message),
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+
   document.getElementById("btn-add-loja").addEventListener("click", async () => {
     const nome = document.getElementById("loja-nome").value.trim();
     if (!nome) return alert("Preencha o nome da loja.");
+    const lat = document.getElementById("loja-lat").value;
+    const lng = document.getElementById("loja-lng").value;
     try {
       await db.collection("lojas").add({
-        nome, endereco: document.getElementById("loja-endereco").value.trim()
+        nome,
+        endereco: document.getElementById("loja-endereco").value.trim(),
+        latitude: lat !== "" ? parseFloat(lat) : null,
+        longitude: lng !== "" ? parseFloat(lng) : null
       });
       document.getElementById("loja-nome").value = "";
       document.getElementById("loja-endereco").value = "";
+      document.getElementById("loja-lat").value = "";
+      document.getElementById("loja-lng").value = "";
       carregarLojas();
     } catch (e) {
       console.error(e);
