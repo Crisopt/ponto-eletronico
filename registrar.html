@@ -46,6 +46,24 @@
 
   #status-texto { margin-top: 18px; color: var(--cream-dim); font-size: 14px; min-height: 20px; }
 
+  #nome-reconhecido {
+    margin-top: 14px; font-size: 19px; font-weight: 800; min-height: 26px; color: var(--mint);
+  }
+
+  #btn-bater-ponto {
+    margin-top: 18px; width: 100%; max-width: 280px; padding: 15px;
+    border-radius: 12px; border: none; background: var(--line); color: var(--cream-dim);
+    font-weight: 800; font-size: 15px; font-family: inherit; cursor: not-allowed;
+    transition: background .2s, color .2s; -webkit-tap-highlight-color: transparent;
+  }
+  #btn-bater-ponto.pronto { background: var(--mint); color: #0F1A17; cursor: pointer; }
+
+  #link-tentar-de-novo {
+    display: none; margin-top: 10px; color: var(--cream-dim); font-size: 13px;
+    text-decoration: underline; cursor: pointer; background: none; border: none; font-family: inherit;
+  }
+  #link-tentar-de-novo.visivel { display: inline-block; }
+
   /* CONFIRMAÇÃO */
   #tela-ok { text-align: center; display: none; }
   .ring {
@@ -85,7 +103,11 @@
       <div id="video-wrap">
         <video id="video" autoplay muted playsinline></video>
       </div>
+      <div id="nome-reconhecido"></div>
       <div id="status-texto">Carregando modelo de reconhecimento...</div>
+      <button id="btn-bater-ponto" disabled>Bater ponto</button>
+      <br>
+      <button id="link-tentar-de-novo">Não é você? Tentar novamente</button>
     </div>
 
     <div id="tela-ok">
@@ -124,7 +146,27 @@
 
 <script>
   const MODEL_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/";
-  const LIMITE_DISTANCIA = 0.5; // quanto menor, mais rígido o reconhecimento (0.4 a 0.55 é razoável)
+  const LIMITE_DISTANCIA = 0.5; // quanto menor, mais rígido o reconhecimento facial (0.4 a 0.55 é razoável)
+  const RAIO_PERMITIDO_METROS = 150; // distância máxima aceitável entre o celular e a loja
+
+  function distanciaMetros(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // raio da Terra em metros
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  }
+
+  function obterLocalizacaoAtual() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error("Geolocalização não suportada neste navegador."));
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true, timeout: 12000, maximumAge: 0
+      });
+    });
+  }
 
   function tickRelogio() {
     document.getElementById("relogio").textContent = new Date().toLocaleTimeString("pt-BR");
@@ -153,6 +195,8 @@
 
   let funcionariosCadastrados = []; // [{id, nome, lojaId, descritor: Float32Array}]
   let pausado = false;
+  let aguardandoConfirmacao = false;
+  let funcionarioPronto = null;
   let intervaloReconhecimento = null;
 
   async function carregarFuncionariosComRosto() {
@@ -171,11 +215,11 @@
     });
   }
 
-  async function carregarNomeLoja(lojaId) {
+  async function carregarLoja(lojaId) {
     try {
       const doc = await db.collection("lojas").doc(lojaId).get();
-      return doc.exists ? doc.data().nome : "—";
-    } catch (e) { return "—"; }
+      return doc.exists ? doc.data() : null;
+    } catch (e) { return null; }
   }
 
   async function iniciarCamera() {
@@ -188,7 +232,7 @@
   async function loopReconhecimento() {
     const video = document.getElementById("video");
     intervaloReconhecimento = setInterval(async () => {
-      if (pausado || funcionariosCadastrados.length === 0) return;
+      if (pausado || aguardandoConfirmacao || funcionariosCadastrados.length === 0) return;
 
       const deteccao = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
         .withFaceLandmarks().withFaceDescriptor();
@@ -203,12 +247,65 @@
       }
 
       if (melhor && melhorDist < LIMITE_DISTANCIA) {
-        pausado = true;
-        videoWrap.classList.add("reconhecendo");
-        await processarBatida(melhor);
+        confirmarReconhecimento(melhor);
       }
     }, 900);
   }
+
+  function confirmarReconhecimento(funcionario) {
+    aguardandoConfirmacao = true;
+    funcionarioPronto = funcionario;
+    videoWrap.classList.add("reconhecendo");
+    document.getElementById("nome-reconhecido").textContent = funcionario.nome;
+    statusTexto.textContent = "Rosto reconhecido — toque em Bater ponto";
+    const btn = document.getElementById("btn-bater-ponto");
+    btn.disabled = false;
+    btn.classList.add("pronto");
+    document.getElementById("link-tentar-de-novo").classList.add("visivel");
+  }
+
+  document.getElementById("btn-bater-ponto").addEventListener("click", async () => {
+    if (!funcionarioPronto) return;
+    const btn = document.getElementById("btn-bater-ponto");
+    btn.disabled = true;
+    btn.classList.remove("pronto");
+    pausado = true;
+
+    try {
+      statusTexto.textContent = "Verificando sua localização...";
+      const loja = await carregarLoja(funcionarioPronto.lojaId);
+
+      if (loja && loja.latitude != null && loja.longitude != null) {
+        const pos = await obterLocalizacaoAtual();
+        const dist = distanciaMetros(
+          pos.coords.latitude, pos.coords.longitude,
+          loja.latitude, loja.longitude
+        );
+        if (dist > RAIO_PERMITIDO_METROS) {
+          mostrarErro("Fora da loja", `Você está a ${Math.round(dist)}m de distância. Aproxime-se da loja para bater o ponto.`);
+          return;
+        }
+      }
+      // Se a loja ainda não tem localização cadastrada, o ponto é liberado sem checagem
+      // (avise o RH para configurar a localização da loja no painel admin).
+
+      statusTexto.textContent = "Registrando...";
+      await processarBatida(funcionarioPronto);
+    } catch (e) {
+      console.error(e);
+      if (e.code === 1) { // GeolocationPositionError.PERMISSION_DENIED
+        mostrarErro("Localização bloqueada", "Ative a permissão de localização do navegador/celular para bater o ponto.");
+      } else if (e.code === 2 || e.code === 3) { // POSITION_UNAVAILABLE / TIMEOUT
+        mostrarErro("Localização indisponível", "Não foi possível obter sua localização. Verifique o GPS e tente novamente.");
+      } else {
+        mostrarErro("Erro ao verificar localização", "Tente novamente.");
+      }
+    }
+  });
+
+  document.getElementById("link-tentar-de-novo").addEventListener("click", () => {
+    resetParaScan();
+  });
 
   async function processarBatida(funcionario) {
     try {
@@ -219,7 +316,8 @@
         return;
       }
 
-      const lojaNome = await carregarNomeLoja(funcionario.lojaId);
+      const loja = await carregarLoja(funcionario.lojaId);
+      const lojaNome = loja ? loja.nome : "—";
       document.getElementById("ok-tipo").textContent = resultado.label + " registrada";
       document.getElementById("ok-nome").textContent = funcionario.nome;
       document.getElementById("ok-loja").textContent = lojaNome;
@@ -228,7 +326,13 @@
       voltarParaScanApos(3200);
     } catch (e) {
       console.error(e);
-      mostrarErro("Erro ao registrar", "Verifique a conexão com a internet e tente novamente.");
+      if (e.code === "permission-denied") {
+        mostrarErro("Sem permissão no banco", "As regras do Firestore estão bloqueando esta ação. Avise o RH.");
+      } else if (e.code === "failed-precondition") {
+        mostrarErro("Configuração pendente", "Falta um índice no banco de dados. Avise o RH (erro: failed-precondition).");
+      } else {
+        mostrarErro("Erro ao registrar", "Verifique a conexão com a internet e tente novamente.");
+      }
     }
   }
 
@@ -239,12 +343,22 @@
     voltarParaScanApos(2800);
   }
 
+  function resetParaScan() {
+    mostrarSomente(telaScan);
+    videoWrap.classList.remove("reconhecendo");
+    document.getElementById("nome-reconhecido").textContent = "";
+    statusTexto.textContent = "Aponte para o seu rosto";
+    const btn = document.getElementById("btn-bater-ponto");
+    btn.disabled = true;
+    btn.classList.remove("pronto");
+    document.getElementById("link-tentar-de-novo").classList.remove("visivel");
+    funcionarioPronto = null;
+    aguardandoConfirmacao = false;
+    pausado = false;
+  }
+
   function voltarParaScanApos(ms) {
-    setTimeout(() => {
-      mostrarSomente(telaScan);
-      videoWrap.classList.remove("reconhecendo");
-      pausado = false;
-    }, ms);
+    setTimeout(() => { resetParaScan(); }, ms);
   }
 
   async function iniciar() {
