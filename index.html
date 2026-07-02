@@ -154,7 +154,11 @@
     </div>
   </main>
 
-  <footer>Terminal ID: <span id="device-id-footer"></span></footer>
+  <footer>
+    Terminal ID: <span id="device-id-footer"></span>
+    &nbsp;·&nbsp;
+    <a href="#" id="link-trocar-loja" style="color:inherit;text-decoration:underline">Trocar loja deste terminal</a>
+  </footer>
 </div>
 
 <!-- Firebase SDK (compat, sem build step) -->
@@ -333,6 +337,15 @@
       processando = false;
     }, ms);
   }
+
+  document.getElementById("link-trocar-loja").addEventListener("click", (e) => {
+    e.preventDefault();
+    const ok = confirm("Trocar a loja vinculada a este terminal? O aparelho vai pedir para selecionar a loja novamente.");
+    if (!ok) return;
+    localStorage.removeItem("pontoFacil_lojaId");
+    localStorage.removeItem("pontoFacil_lojaNome");
+    location.reload();
+  });
 
   iniciar();
 </script>
