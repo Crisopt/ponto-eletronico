@@ -14,12 +14,38 @@ const LABELS = {
   saida: "Saída (fim do turno)"
 };
 
+// Distância máxima aceitável (em metros) entre o celular e a loja no momento da batida
+const RAIO_PERMITIDO_METROS = 150;
+
 function inicioDoDia() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
 }
 
+// ---------- GEOLOCALIZAÇÃO ----------
+function distanciaMetros(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // raio da Terra em metros
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function obterLocalizacaoAtual() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error("Geolocalização não suportada neste navegador."));
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 0
+    });
+  });
+}
+
+// ---------- REGISTRO DO PONTO ----------
 async function proximoTipoDeRegistro(funcionarioId) {
   const inicio = inicioDoDia();
 
@@ -41,21 +67,29 @@ async function proximoTipoDeRegistro(funcionarioId) {
   return SEQUENCIA[registrosHoje.length];
 }
 
-async function registrarPonto(funcionario, deviceId, lojaId) {
+// coords (opcional): { latitude, longitude } do celular no momento da batida
+async function registrarPonto(funcionario, deviceId, lojaId, coords = null) {
   const tipo = await proximoTipoDeRegistro(funcionario.id);
 
   if (!tipo) {
     return { ok: false, motivo: "JORNADA_COMPLETA" };
   }
 
-  await db.collection("registros").add({
+  const dados = {
     funcionarioId: funcionario.id,
     funcionarioNome: funcionario.nome,
     lojaId: lojaId,
     deviceId: deviceId,
     tipo: tipo,
     timestamp: firebase.firestore.FieldValue.serverTimestamp()
-  });
+  };
+
+  if (coords && coords.latitude != null && coords.longitude != null) {
+    dados.latitude = coords.latitude;
+    dados.longitude = coords.longitude;
+  }
+
+  await db.collection("registros").add(dados);
 
   return { ok: true, tipo, label: LABELS[tipo] };
 }
