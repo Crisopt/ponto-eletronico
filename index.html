@@ -277,7 +277,7 @@
       const doc = snap.docs[0];
       const funcionario = { id: doc.id, ...doc.data() };
 
-      // ---------- Checagem de localização (se a loja tiver coordenadas cadastradas) ----------
+      // ---------- Checagem de localização (se a loja tiver coordenadas cadastradas) -----------
       const lojaDoc = await db.collection("lojas").doc(lojaVinculada).get();
       const loja = lojaDoc.exists ? lojaDoc.data() : null;
       let coords = null;
